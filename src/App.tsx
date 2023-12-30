@@ -3,12 +3,17 @@
 import { useCallback, useRef, useState } from "react";
 import { animated, useSpring } from "@react-spring/web";
 import { useWhiteboardCards } from "./lib/hooks/stores/whiteboard-cards";
-import { useMouseEventListener } from "./lib/hooks/useMousePointer";
+import {
+  useMouseEventListener,
+  useScrollEventListener,
+} from "@/lib/hooks/useWindowListeners";
 
 export default function App() {
   const [isDraggable, setIsDraggable] = useState(false);
+
   // the ui isn't reacting to this (yet at least), so it can exist as a ref
   const isDragging = useRef(false);
+  const isScrollable = useRef(false);
   // same here
   const startingPosition = useRef<{ x: number; y: number } | null>(null);
 
@@ -18,30 +23,44 @@ export default function App() {
   ]);
 
   const [springs, api] = useSpring(() => ({
-    from: { x: 0, y: 0 },
+    from: { x: 0, y: 0, scale: 1 },
   }));
 
   // not sure if this is totally neccessary, but it tidies up the useEffect a bit. Doesn't seem to be reattacthing
   // the listener every time
   useMouseEventListener(
-    useCallback((e: MouseEvent) => {
-      if (!isDragging.current) return;
+    useCallback(
+      (e: MouseEvent) => {
+        if (!isDragging.current) return;
 
-      // Calculate the new position based on the difference between the current mouse position and the starting position
-      const x = e.clientX - (startingPosition.current?.x ?? 0);
-      const y = e.clientY - (startingPosition.current?.y ?? 0);
-      console.debug(
-        "X",
-        e.clientX,
-        "Starting X",
-        startingPosition.current?.x,
-        "New position",
-        x,
-      );
+        // Calculate the new position based on the difference between the current mouse position and the starting position
+        const x = e.clientX - (startingPosition.current?.x ?? 0);
+        const y = e.clientY - (startingPosition.current?.y ?? 0);
 
-      // Update the spring with the new position
-      api.start({ to: { x, y } });
-    }, []),
+        // Update the spring with the new position
+        api.start({ to: { x, y } });
+      },
+      [api],
+    ),
+  );
+
+  useScrollEventListener(
+    useCallback(
+      (e: WheelEvent) => {
+        if (!isScrollable.current) return;
+
+        if (e.deltaY < 0) {
+          api.start({
+            to: {
+              scale: springs.scale.get() + 0.1,
+            },
+          });
+        } else {
+          api.start({ to: { scale: springs.scale.get() - 0.1 } });
+        }
+      },
+      [api, springs.scale],
+    ),
   );
 
   const onMouseDown = (e: React.MouseEvent<HTMLElement, MouseEvent>) => {
@@ -60,13 +79,26 @@ export default function App() {
   };
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLElement>) => {
-    if (isDraggable || e.key !== " ") return;
-    setIsDraggable(true);
+    if (e.key === " " && !isDraggable) {
+      setIsDraggable(true);
+      return;
+    }
+
+    if (e.key === "Control" && !isScrollable.current) {
+      isScrollable.current = true;
+      return;
+    }
   };
 
   const onKeyUp = (e: React.KeyboardEvent<HTMLElement>) => {
-    if (e.key !== " ") return;
-    setIsDraggable(false);
+    if (e.key === " " && isDraggable) {
+      setIsDraggable(false);
+      return;
+    }
+    if (e.key === "Control" && isScrollable.current) {
+      isScrollable.current = false;
+      return;
+    }
   };
 
   return (
@@ -81,8 +113,8 @@ export default function App() {
 
           addCard({
             position: {
-              x: e.clientX + xTransformed,
-              y: e.clientY + yTransformed,
+              x: (e.clientX + xTransformed) / springs.scale.get(),
+              y: (e.clientY + yTransformed) / springs.scale.get(),
             },
           });
         }}
